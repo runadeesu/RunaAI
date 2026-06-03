@@ -17,7 +17,7 @@ llm = Ollama(model="qwen2.5-coder:3b")
 st.set_page_config(page_title="RunaAI Pro", layout="wide")
 st.title("⚡ RunaAI Pro")
 
-# --- 2. 自動ログインロジック ---
+# --- 2. 認証処理 ---
 query_params = st.query_params
 if not st.session_state.user and "token" in query_params:
     try:
@@ -25,7 +25,6 @@ if not st.session_state.user and "token" in query_params:
         st.session_state.user = {"id": user.id, "name": user.email.split("@")[0]}
     except: st.query_params.clear()
 
-# --- 3. 認証エリア ---
 if not st.session_state.user:
     tab1, tab2 = st.tabs(["🔒 ログイン", "📝 新規登録"])
     with tab1:
@@ -42,10 +41,8 @@ if not st.session_state.user:
         if st.button("登録"):
             st.session_state.supabase.auth.sign_up({"email": email, "password": pw})
             st.warning("確認メールをチェックしてください")
-
-# --- 4. メインチャットエリア（全機能統合） ---
 else:
-    # 4-A. サイドバー機能
+    # --- 3. サイドバー機能 ---
     st.sidebar.write(f"👤 {st.session_state.user['name']} さん")
     if st.sidebar.button("🔒 ログアウト"):
         st.query_params.clear()
@@ -58,7 +55,7 @@ else:
     
     st.sidebar.divider()
     
-    # 4-B. 履歴表示・削除
+    # 履歴表示・読み込み・削除
     try:
         sessions = st.session_state.supabase.table("chat_sessions").select("*").eq("user_id", st.session_state.user["id"]).order("created_at", desc=True).execute().data
         for s in sessions:
@@ -72,25 +69,24 @@ else:
                 st.session_state.supabase.table("chat_messages").delete().eq("session_id", s['id']).execute()
                 st.session_state.supabase.table("chat_sessions").delete().eq("id", s['id']).execute()
                 st.rerun()
-    except Exception as e: st.sidebar.error("履歴取得不可")
+    except: st.sidebar.error("履歴取得不可")
 
-    # 4-C. ファイルアップロード
     uploaded_file = st.sidebar.file_uploader("コードファイル添付")
 
-    # 4-D. チャットメイン処理
+    # --- 4. メインチャット ---
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
     if prompt := st.chat_input("コードや質問を入力..."):
         file_text = uploaded_file.read().decode('utf-8', errors='ignore') if uploaded_file else ""
         
-        # 思考強化プロンプト
+        # 思考プロセス付きプロンプト
         system_instr = "シニアエンジニアです。回答前に【分析→検討→結論】の順に論理的に思考してから回答してください。"
         context = f"System: {system_instr}\n\nUser: {prompt} {file_text}\nAssistant: (思考プロセスから出力)"
         
         resp = llm.invoke(context)
         
-        # 履歴保存
+        # 履歴の保存
         if not st.session_state.current_session_id:
             res = st.session_state.supabase.table("chat_sessions").insert({"user_id": st.session_state.user["id"], "title": prompt[:15]}).execute()
             st.session_state.current_session_id = res.data[0]["id"]
