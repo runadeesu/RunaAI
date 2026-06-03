@@ -7,6 +7,7 @@ if "messages" not in st.session_state: st.session_state.messages = []
 if "user" not in st.session_state: st.session_state.user = None
 if "current_session_id" not in st.session_state: st.session_state.current_session_id = None
 
+# Supabase接続情報
 supabase_url = "https://jzjwuhpqrkfogbxhibru.supabase.co"
 supabase_key = "sb_publishable_ltrBPergvNFxjAUmSXJf-w_dq-TE8mK"
 if "supabase" not in st.session_state:
@@ -55,12 +56,13 @@ else:
     
     st.sidebar.divider()
     
-    # 履歴表示・読み込み・削除
+    # 履歴表示・読み込み・削除 (テーブル名を chat_sessions に修正)
     try:
+        # ここが取得の要です
         sessions = st.session_state.supabase.table("chat_sessions").select("*").eq("user_id", st.session_state.user["id"]).order("created_at", desc=True).execute().data
         for s in sessions:
             col1, col2 = st.sidebar.columns([4, 1])
-            if col1.button(f"📝 {s['title'][:10]}", key=f"btn_{s['id']}"):
+            if col1.button(f"📝 {s.get('title', '無題')[:10]}", key=f"btn_{s['id']}"):
                 st.session_state.current_session_id = s['id']
                 msgs = st.session_state.supabase.table("chat_messages").select("*").eq("session_id", s['id']).order("created_at", desc=False).execute().data
                 st.session_state.messages = [{"role": m["role"], "content": m["content"]} for m in msgs]
@@ -69,7 +71,8 @@ else:
                 st.session_state.supabase.table("chat_messages").delete().eq("session_id", s['id']).execute()
                 st.session_state.supabase.table("chat_sessions").delete().eq("id", s['id']).execute()
                 st.rerun()
-    except: st.sidebar.error("履歴取得不可")
+    except Exception as e: 
+        st.sidebar.error(f"履歴取得エラー: {e}")
 
     uploaded_file = st.sidebar.file_uploader("コードファイル添付")
 
@@ -79,14 +82,10 @@ else:
 
     if prompt := st.chat_input("コードや質問を入力..."):
         file_text = uploaded_file.read().decode('utf-8', errors='ignore') if uploaded_file else ""
-        
-        # 思考プロセス付きプロンプト
         system_instr = "シニアエンジニアです。回答前に【分析→検討→結論】の順に論理的に思考してから回答してください。"
         context = f"System: {system_instr}\n\nUser: {prompt} {file_text}\nAssistant: (思考プロセスから出力)"
-        
         resp = llm.invoke(context)
         
-        # 履歴の保存
         if not st.session_state.current_session_id:
             res = st.session_state.supabase.table("chat_sessions").insert({"user_id": st.session_state.user["id"], "title": prompt[:15]}).execute()
             st.session_state.current_session_id = res.data[0]["id"]
